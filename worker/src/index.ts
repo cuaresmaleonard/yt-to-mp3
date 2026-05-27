@@ -21,8 +21,6 @@ const pool = new Pool({ connectionString: config.DATABASE_URL });
 const YT_DLP_COMMON_ARGS = [
   "--no-playlist",
   "--force-ipv4",
-  "--extractor-args",
-  "youtube:player_client=android,web",
   "--retries",
   "10",
   "--fragment-retries",
@@ -30,6 +28,20 @@ const YT_DLP_COMMON_ARGS = [
   "--sleep-requests",
   "1",
 ];
+
+const PRIMARY_CLIENTS_NO_COOKIES = "android,web";
+const PRIMARY_CLIENTS_WITH_COOKIES = "web,web_safari";
+const FALLBACK_CLIENTS = "web_safari,web_creator,web";
+
+function isRetryableYtDlpError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("requested format is not available") ||
+    normalized.includes("only images are available") ||
+    normalized.includes("signature solving failed") ||
+    normalized.includes("n challenge solving failed")
+  );
+}
 
 let resolvedCookiesPath: string | null = null;
 
@@ -57,7 +69,10 @@ async function getCookiesPath(): Promise<string | null> {
   return resolvedCookiesPath;
 }
 
-async function buildYtDlpArgs(extraArgs: string[]): Promise<string[]> {
+async function buildYtDlpArgs(
+  extraArgs: string[],
+  options?: { fallbackClients?: boolean },
+): Promise<string[]> {
   const args: string[] = [];
 
   if (config.YT_DLP_PROXY_URL) {
@@ -69,8 +84,35 @@ async function buildYtDlpArgs(extraArgs: string[]): Promise<string[]> {
     args.push("--cookies", cookiesPath);
   }
 
+  const playerClients = options?.fallbackClients
+    ? FALLBACK_CLIENTS
+    : cookiesPath
+      ? PRIMARY_CLIENTS_WITH_COOKIES
+      : PRIMARY_CLIENTS_NO_COOKIES;
+
+  args.push("--extractor-args", `youtube:player_client=${playerClients}`);
+
   args.push(...extraArgs);
   return args;
+}
+
+async function runYtDlp(extraArgs: string[]): Promise<string> {
+  try {
+    return await runCommand(config.YT_DLP_BIN, await buildYtDlpArgs(extraArgs));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!isRetryableYtDlpError(message)) {
+      throw error;
+    }
+
+    console.warn(
+      "yt-dlp primary client set failed, retrying with fallback clients",
+    );
+    return runCommand(
+      config.YT_DLP_BIN,
+      await buildYtDlpArgs(extraArgs, { fallbackClients: true }),
+    );
+  }
 }
 
 async function cleanupExpiredArtifacts(): Promise<void> {
@@ -120,10 +162,12 @@ function runCommand(command: string, args: string[]): Promise<string> {
 }
 
 async function fetchDuration(url: string): Promise<number> {
-  const output = await runCommand(
-    config.YT_DLP_BIN,
-    await buildYtDlpArgs(["--print", "duration", ...YT_DLP_COMMON_ARGS, url]),
-  );
+  const output = await runYtDlp([
+    "--print",
+    "duration",
+    ...YT_DLP_COMMON_ARGS,
+    url,
+  ]);
   const duration = Number(
     output.split("\n").find((line) => line.trim().length > 0),
   );
@@ -146,17 +190,14 @@ async function convertToMp3(
   }
 
   const target = path.join(config.OUTPUT_DIR, `${job.id}.mp3`);
-  const title = await runCommand(
-    config.YT_DLP_BIN,
-    await buildYtDlpArgs([
-      "--print",
-      "title",
-      ...YT_DLP_COMMON_ARGS,
-      job.sourceUrl,
-    ]),
-  );
+  const title = await runYtDlp([
+    "--print",
+    "title",
+    ...YT_DLP_COMMON_ARGS,
+    job.sourceUrl,
+  ]);
 
-  const args = await buildYtDlpArgs([
+  const args = [
     "-x",
     "--audio-format",
     "mp3",
@@ -166,9 +207,9 @@ async function convertToMp3(
     target,
     ...YT_DLP_COMMON_ARGS,
     job.sourceUrl,
-  ]);
+  ];
 
-  await runCommand(config.YT_DLP_BIN, args);
+  await runYtDlp(args);
 
   return {
     outputPath: target,
