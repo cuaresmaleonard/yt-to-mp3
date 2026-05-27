@@ -4,6 +4,7 @@ import { z } from "zod";
 dotenv.config();
 
 const ConfigSchema = z.object({
+  PORT: z.coerce.number().optional(),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   QUEUE_NAME: z.string().default("convert-jobs"),

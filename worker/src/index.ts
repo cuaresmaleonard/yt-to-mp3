@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { Worker } from "bullmq";
 import { Pool } from "pg";
 import { config } from "./config.js";
@@ -197,6 +198,23 @@ worker.on("ready", () => {
 worker.on("error", (error) => {
   console.error(error);
 });
+
+if (config.PORT) {
+  const healthServer = createServer((req, res) => {
+    if (req.url === "/health") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("worker alive");
+  });
+
+  healthServer.listen(config.PORT, () => {
+    console.log(`worker health server listening on ${config.PORT}`);
+  });
+}
 
 setInterval(() => {
   void cleanupExpiredArtifacts().catch((error) => {
