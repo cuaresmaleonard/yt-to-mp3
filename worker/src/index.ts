@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { Worker } from "bullmq";
 import { Pool } from "pg";
 import { config } from "./config.js";
@@ -29,6 +30,48 @@ const YT_DLP_COMMON_ARGS = [
   "--sleep-requests",
   "1",
 ];
+
+let resolvedCookiesPath: string | null = null;
+
+async function getCookiesPath(): Promise<string | null> {
+  if (resolvedCookiesPath) {
+    return resolvedCookiesPath;
+  }
+
+  if (config.YT_DLP_COOKIES_PATH) {
+    resolvedCookiesPath = config.YT_DLP_COOKIES_PATH;
+    return resolvedCookiesPath;
+  }
+
+  if (!config.YT_DLP_COOKIES_BASE64) {
+    return null;
+  }
+
+  const filePath = path.join("/tmp", `yt-dlp-cookies-${randomUUID()}.txt`);
+  const decoded = Buffer.from(config.YT_DLP_COOKIES_BASE64, "base64").toString(
+    "utf8",
+  );
+
+  await fs.writeFile(filePath, decoded, { encoding: "utf8", mode: 0o600 });
+  resolvedCookiesPath = filePath;
+  return resolvedCookiesPath;
+}
+
+async function buildYtDlpArgs(extraArgs: string[]): Promise<string[]> {
+  const args: string[] = [];
+
+  if (config.YT_DLP_PROXY_URL) {
+    args.push("--proxy", config.YT_DLP_PROXY_URL);
+  }
+
+  const cookiesPath = await getCookiesPath();
+  if (cookiesPath) {
+    args.push("--cookies", cookiesPath);
+  }
+
+  args.push(...extraArgs);
+  return args;
+}
 
 async function cleanupExpiredArtifacts(): Promise<void> {
   const result = await pool.query(
@@ -77,12 +120,10 @@ function runCommand(command: string, args: string[]): Promise<string> {
 }
 
 async function fetchDuration(url: string): Promise<number> {
-  const output = await runCommand(config.YT_DLP_BIN, [
-    "--print",
-    "duration",
-    ...YT_DLP_COMMON_ARGS,
-    url,
-  ]);
+  const output = await runCommand(
+    config.YT_DLP_BIN,
+    await buildYtDlpArgs(["--print", "duration", ...YT_DLP_COMMON_ARGS, url]),
+  );
   const duration = Number(
     output.split("\n").find((line) => line.trim().length > 0),
   );
@@ -105,14 +146,17 @@ async function convertToMp3(
   }
 
   const target = path.join(config.OUTPUT_DIR, `${job.id}.mp3`);
-  const title = await runCommand(config.YT_DLP_BIN, [
-    "--print",
-    "title",
-    ...YT_DLP_COMMON_ARGS,
-    job.sourceUrl,
-  ]);
+  const title = await runCommand(
+    config.YT_DLP_BIN,
+    await buildYtDlpArgs([
+      "--print",
+      "title",
+      ...YT_DLP_COMMON_ARGS,
+      job.sourceUrl,
+    ]),
+  );
 
-  const args = [
+  const args = await buildYtDlpArgs([
     "-x",
     "--audio-format",
     "mp3",
@@ -122,7 +166,7 @@ async function convertToMp3(
     target,
     ...YT_DLP_COMMON_ARGS,
     job.sourceUrl,
-  ];
+  ]);
 
   await runCommand(config.YT_DLP_BIN, args);
 
