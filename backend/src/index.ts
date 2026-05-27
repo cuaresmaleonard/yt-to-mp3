@@ -212,8 +212,9 @@ app.get("/api/download/:token", async (req, res) => {
 
 async function main(): Promise<void> {
   await initDb();
-  app.listen(config.BACKEND_PORT, () => {
-    console.log(`backend listening on ${config.BACKEND_PORT}`);
+  const listenPort = config.PORT ?? config.BACKEND_PORT;
+  app.listen(listenPort, () => {
+    console.log(`backend listening on ${listenPort}`);
   });
 }
 

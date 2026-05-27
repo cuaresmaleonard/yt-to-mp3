@@ -4,6 +4,7 @@ import { z } from "zod";
 dotenv.config();
 
 const ConfigSchema = z.object({
+  PORT: z.coerce.number().optional(),
   BACKEND_PORT: z.coerce.number().default(4000),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
