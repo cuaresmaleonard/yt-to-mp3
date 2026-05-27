@@ -35,7 +35,12 @@ function sanitizeDownloadFileName(title: string | null | undefined): string {
   return `${baseName}.mp3`;
 }
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(
+  cors({
+    origin: config.FRONTEND_ORIGIN,
+    credentials: true,
+  }),
+);
 app.use(cookieParser());
 app.use(express.json());
 

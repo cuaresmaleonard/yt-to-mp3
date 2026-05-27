@@ -6,6 +6,7 @@ dotenv.config();
 const ConfigSchema = z.object({
   PORT: z.coerce.number().optional(),
   BACKEND_PORT: z.coerce.number().default(4000),
+  FRONTEND_ORIGIN: z.string().url(),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   QUEUE_NAME: z.string().default("convert-jobs"),

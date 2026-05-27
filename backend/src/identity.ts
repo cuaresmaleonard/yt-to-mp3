@@ -22,8 +22,8 @@ export function resolvePrincipal(req: Request, res: Response): Principal {
   const newGuestId = crypto.randomUUID();
   res.cookie(GUEST_COOKIE, newGuestId, {
     httpOnly: true,
-    sameSite: "lax",
-    secure: false,
+    sameSite: "none",
+    secure: true,
     maxAge: 1000 * 60 * 60 * 24 * 14,
   });
 
